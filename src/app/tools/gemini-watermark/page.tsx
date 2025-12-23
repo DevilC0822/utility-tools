@@ -17,6 +17,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { processImage, getWatermarkConfig } from "@/lib/watermark-remover";
+import { recordToolUsage } from "@/lib/stats";
 import {
   type HistoryRecord,
   getHistory,
@@ -97,6 +98,8 @@ export default function GeminiWatermarkPage() {
       img.src = result.original;
 
       setState("done");
+      // 处理成功后记录工具使用
+      recordToolUsage("gemini-watermark");
     } catch (err) {
       setError(err instanceof Error ? err.message : "处理失败");
       setState("error");

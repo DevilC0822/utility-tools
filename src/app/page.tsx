@@ -2,7 +2,7 @@
 
 import { motion, AnimatePresence, LayoutGroup } from "framer-motion";
 import Link from "next/link";
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import {
   ImageOff,
   Minimize2,
@@ -14,7 +14,10 @@ import {
   Shield,
   Clock,
   ArrowRight,
+  Eye,
+  MousePointerClick,
 } from "lucide-react";
+import { fetchStats, recordVisit, type Stats } from "@/lib/stats";
 
 // Tool definitions
 const tools = [
@@ -230,6 +233,14 @@ function ToolCard({ tool }: { tool: (typeof tools)[0] }) {
 export default function Home() {
   // 标签过滤状态，空数组表示"全部"
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  // 统计数据
+  const [stats, setStats] = useState<Stats | null>(null);
+
+  // 加载统计数据并记录访问
+  useEffect(() => {
+    recordVisit();
+    fetchStats().then(setStats).catch(console.error);
+  }, []);
 
   // 处理标签点击
   const handleTagClick = useCallback((tag: string) => {
@@ -357,6 +368,26 @@ export default function Home() {
           <motion.footer layout className="pb-12 px-6">
             <div className="max-w-6xl mx-auto">
               <div className="glass-card p-6 text-center">
+              {/* 统计数据展示 */}
+              {stats && (
+                <div className="flex items-center justify-center gap-6 mb-4 flex-wrap">
+                  <div className="flex items-center gap-2 text-white/60">
+                    <Eye className="w-4 h-4 text-[#64ffda]" />
+                    <span className="text-sm">
+                      访问量 <span className="text-white font-medium">{stats.totalVisits.toLocaleString()}</span>
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 text-white/60">
+                    <MousePointerClick className="w-4 h-4 text-[#ff6b9d]" />
+                    <span className="text-sm">
+                      工具使用{" "}
+                      <span className="text-white font-medium">
+                        {Object.values(stats.toolStats).reduce((a, b) => a + b, 0).toLocaleString()}
+                      </span>
+                    </span>
+                  </div>
+                </div>
+              )}
               <p className="text-white/40 text-sm">
                 所有工具均在浏览器本地运行，您的数据不会上传到任何服务器
               </p>
