@@ -4,6 +4,15 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import {
+  Modal,
+  ModalContent,
+  ModalHeader,
+  ModalBody,
+  ModalFooter,
+  Button,
+  useDisclosure,
+} from "@heroui/react";
+import {
   Upload,
   Download,
   RefreshCw,
@@ -28,6 +37,15 @@ import {
 } from "@/lib/history-storage";
 
 type ProcessingState = "idle" | "processing" | "done" | "error";
+type BatchStatus = "pending" | "processing" | "done" | "error";
+
+type BatchItem = {
+  id: string;
+  fileName: string;
+  status: BatchStatus;
+  error?: string;
+  record?: HistoryRecord;
+};
 
 export default function GeminiWatermarkPage() {
   const [state, setState] = useState<ProcessingState>("idle");
@@ -42,6 +60,7 @@ export default function GeminiWatermarkPage() {
     watermarkSize: number;
   } | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [batchItems, setBatchItems] = useState<BatchItem[]>([]);
   const [history, setHistory] = useState<HistoryRecord[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [previewRecord, setPreviewRecord] = useState<HistoryRecord | null>(null);
@@ -53,38 +72,74 @@ export default function GeminiWatermarkPage() {
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // HeroUI Modal 控制
+  const {
+    isOpen: isPreviewRecordOpen,
+    onOpen: onPreviewRecordOpen,
+    onOpenChange: onPreviewRecordOpenChange,
+  } = useDisclosure();
+  const {
+    isOpen: isPreviewImageOpen,
+    onOpen: onPreviewImageOpen,
+    onOpenChange: onPreviewImageOpenChange,
+  } = useDisclosure();
+  const {
+    isOpen: isClearConfirmOpen,
+    onOpen: onClearConfirmOpen,
+    onOpenChange: onClearConfirmOpenChange,
+  } = useDisclosure();
+
   // 加载历史记录
   useEffect(() => {
     getHistory().then(setHistory);
   }, []);
 
-  const handleFile = useCallback(async (file: File) => {
-    if (!file.type.startsWith("image/")) {
-      setError("请上传图片文件");
-      return;
-    }
-
-    setState("processing");
-    setError(null);
-    setFileName(file.name);
-
-    try {
-      const result = await processImage(file);
-      setOriginalImage(result.original);
-      setProcessedImage(result.processed);
-      setProcessedBlob(result.blob);
-
-      const img = new Image();
-      img.onload = async () => {
-        const config = getWatermarkConfig(img.width, img.height);
-        const info = {
-          width: img.width,
-          height: img.height,
-          watermarkSize: config.size,
+  const resolveImageInfo = useCallback((dataUrl: string) => {
+    return new Promise<{ width: number; height: number; watermarkSize: number }>(
+      (resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+          const config = getWatermarkConfig(img.width, img.height);
+          resolve({
+            width: img.width,
+            height: img.height,
+            watermarkSize: config.size,
+          });
         };
+        img.onerror = () => reject(new Error("加载图像失败"));
+        img.src = dataUrl;
+      }
+    );
+  }, []);
+
+  const updateBatchItem = useCallback((id: string, updates: Partial<BatchItem>) => {
+    setBatchItems((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, ...updates } : item))
+    );
+  }, []);
+
+  const handleSingleFile = useCallback(
+    async (file: File) => {
+      if (!file.type.startsWith("image/")) {
+        setError("请上传图片文件");
+        setState("error");
+        return;
+      }
+
+      setBatchItems([]);
+      setState("processing");
+      setError(null);
+      setFileName(file.name);
+
+      try {
+        const result = await processImage(file);
+        setOriginalImage(result.original);
+        setProcessedImage(result.processed);
+        setProcessedBlob(result.blob);
+
+        const info = await resolveImageInfo(result.original);
         setImageInfo(info);
 
-        // 保存到历史记录
         await addHistory({
           fileName: file.name,
           originalImage: result.original,
@@ -94,26 +149,100 @@ export default function GeminiWatermarkPage() {
           watermarkSize: info.watermarkSize,
         });
         getHistory().then(setHistory);
-      };
-      img.src = result.original;
 
+        setState("done");
+        // 处理成功后记录工具使用
+        recordToolUsage("gemini-watermark");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "处理失败");
+        setState("error");
+      }
+    },
+    [resolveImageInfo]
+  );
+
+  const handleBatchFiles = useCallback(
+    async (files: File[]) => {
+      const batchId = Date.now();
+      const initialItems = files.map((file, index) => ({
+        id: `${batchId}-${index}-${Math.random().toString(36).slice(2, 8)}`,
+        fileName: file.name,
+        status: "pending" as BatchStatus,
+      }));
+
+      setBatchItems(initialItems);
+      setState("processing");
+      setError(null);
+      setOriginalImage(null);
+      setProcessedImage(null);
+      setProcessedBlob(null);
+      setFileName("");
+      setImageInfo(null);
+
+      let hasSuccess = false;
+
+      for (const [index, file] of files.entries()) {
+        const itemId = initialItems[index].id;
+        updateBatchItem(itemId, { status: "processing" });
+
+        try {
+          const result = await processImage(file);
+          const info = await resolveImageInfo(result.original);
+          const record = await addHistory({
+            fileName: file.name,
+            originalImage: result.original,
+            processedImage: result.processed,
+            width: info.width,
+            height: info.height,
+            watermarkSize: info.watermarkSize,
+          });
+
+          updateBatchItem(itemId, { status: "done", record });
+          hasSuccess = true;
+        } catch (err) {
+          updateBatchItem(itemId, {
+            status: "error",
+            error: err instanceof Error ? err.message : "处理失败",
+          });
+        }
+      }
+
+      getHistory().then(setHistory);
       setState("done");
-      // 处理成功后记录工具使用
-      recordToolUsage("gemini-watermark");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "处理失败");
-      setState("error");
-    }
-  }, []);
+      if (hasSuccess) {
+        recordToolUsage("gemini-watermark");
+      }
+    },
+    [resolveImageInfo, updateBatchItem]
+  );
+
+  const handleFiles = useCallback(
+    (files: File[]) => {
+      const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+      if (imageFiles.length === 0) {
+        setError("请上传图片文件");
+        setState("error");
+        return;
+      }
+      if (imageFiles.length === 1) {
+        void handleSingleFile(imageFiles[0]);
+        return;
+      }
+      void handleBatchFiles(imageFiles);
+    },
+    [handleBatchFiles, handleSingleFile]
+  );
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
       setDragActive(false);
-      const file = e.dataTransfer.files[0];
-      if (file) handleFile(file);
+      const files = Array.from(e.dataTransfer.files);
+      if (files.length > 0) {
+        handleFiles(files);
+      }
     },
-    [handleFile]
+    [handleFiles]
   );
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -128,10 +257,12 @@ export default function GeminiWatermarkPage() {
 
   const handleFileInput = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (file) handleFile(file);
+      const files = Array.from(e.target.files ?? []);
+      if (files.length > 0) {
+        handleFiles(files);
+      }
     },
-    [handleFile]
+    [handleFiles]
   );
 
   const handleDownload = useCallback(() => {
@@ -145,6 +276,14 @@ export default function GeminiWatermarkPage() {
     URL.revokeObjectURL(url);
   }, [processedBlob, fileName]);
 
+  const handleDownloadRecord = useCallback((record: HistoryRecord) => {
+    const baseName = record.fileName.replace(/\.[^.]+$/, "");
+    const a = document.createElement("a");
+    a.href = record.processedImage;
+    a.download = `${baseName}_no_watermark.png`;
+    a.click();
+  }, []);
+
   const handleReset = useCallback(() => {
     setState("idle");
     setOriginalImage(null);
@@ -153,6 +292,7 @@ export default function GeminiWatermarkPage() {
     setError(null);
     setFileName("");
     setImageInfo(null);
+    setBatchItems([]);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -164,11 +304,19 @@ export default function GeminiWatermarkPage() {
   }, []);
 
   const handleClearHistory = useCallback(async () => {
-    if (!confirm("确定要清空所有历史记录吗？")) return;
     await clearHistory();
     setHistory([]);
     setShowHistory(false);
   }, []);
+
+  const isBatchMode = batchItems.length > 0;
+  const batchTotal = batchItems.length;
+  const batchCompleted = batchItems.filter(
+    (item) => item.status === "done" || item.status === "error"
+  ).length;
+  const batchSuccess = batchItems.filter((item) => item.status === "done").length;
+  const batchFailed = batchItems.filter((item) => item.status === "error").length;
+  const batchCurrent = batchItems.find((item) => item.status === "processing")?.fileName;
 
   return (
     <div className="min-h-screen relative">
@@ -238,7 +386,7 @@ export default function GeminiWatermarkPage() {
                 <h2 className="heading-display text-lg text-white">转换历史</h2>
                 {history.length >= 2 && (
                   <button
-                    onClick={handleClearHistory}
+                    onClick={onClearConfirmOpen}
                     className="text-sm text-white/40 hover:text-white/70 transition-colors"
                   >
                     清空全部
@@ -251,7 +399,10 @@ export default function GeminiWatermarkPage() {
                     key={record.id}
                     className="group relative rounded-xl overflow-hidden cursor-pointer transition-transform hover:scale-105"
                     style={{ background: "rgba(0,0,0,0.3)" }}
-                    onClick={() => setPreviewRecord(record)}
+                    onClick={() => {
+                      setPreviewRecord(record);
+                      onPreviewRecordOpen();
+                    }}
                   >
                     <img
                       src={record.processedImage}
@@ -280,128 +431,178 @@ export default function GeminiWatermarkPage() {
           )}
         </AnimatePresence>
 
-        {/* 历史记录预览弹窗 */}
-        <AnimatePresence>
-          {previewRecord && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-50 flex items-center justify-center p-4"
-              style={{ background: "rgba(15, 12, 41, 0.9)" }}
-              onClick={() => setPreviewRecord(null)}
-            >
-              <motion.div
-                initial={{ scale: 0.9, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.9, opacity: 0 }}
-                className="glass-card p-6 max-w-4xl w-full max-h-[90vh] overflow-auto"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h3 className="heading-display text-lg text-white">
-                      {previewRecord.fileName}
-                    </h3>
-                    <p className="text-sm text-white/50">
-                      {previewRecord.width} × {previewRecord.height} · {formatTime(previewRecord.createdAt)}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setPreviewRecord(null)}
-                    className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
-                  >
-                    <X className="w-5 h-5 text-white/70" />
-                  </button>
-                </div>
-                <div className="grid md:grid-cols-2 gap-4">
-                  <div className="glass-card p-4">
-                    <span className="tag text-xs mb-3 inline-block">原图</span>
-                    <img
-                      src={previewRecord.originalImage}
-                      alt="原图"
-                      className="w-full rounded-lg cursor-zoom-in hover:opacity-90 transition-opacity"
-                      onClick={() => setPreviewImage({
-                        src: previewRecord.originalImage,
-                        title: "原图",
-                        fileName: previewRecord.fileName,
-                        isProcessed: false,
-                      })}
-                    />
-                  </div>
-                  <div className="glass-card p-4" style={{ borderColor: "rgba(100, 255, 218, 0.3)" }}>
-                    <span className="tag tag-mint text-xs mb-3 inline-flex items-center gap-1">
-                      <Check className="w-3 h-3" />
-                      已移除水印
-                    </span>
-                    <img
-                      src={previewRecord.processedImage}
-                      alt="处理后"
-                      className="w-full rounded-lg cursor-zoom-in hover:opacity-90 transition-opacity"
-                      onClick={() => setPreviewImage({
-                        src: previewRecord.processedImage,
-                        title: "已移除水印",
-                        fileName: previewRecord.fileName,
-                        isProcessed: true,
-                      })}
-                    />
-                  </div>
-                </div>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {/* 历史记录预览弹窗 - HeroUI Modal */}
+        <Modal
+          isOpen={isPreviewRecordOpen}
+          onOpenChange={onPreviewRecordOpenChange}
+          size="4xl"
+          backdrop="blur"
+          scrollBehavior="inside"
+          classNames={{
+            backdrop: "bg-[#0f0c29]/80 backdrop-blur-md",
+            base: "border-[#292f46] bg-[#19172c] text-[#a8b0d3]",
+            header: "border-b-[1px] border-[#292f46]",
+            body: "py-6",
+            closeButton: "hover:bg-white/5 active:bg-white/10",
+          }}
+        >
+          <ModalContent>
+            {(onClose) => (
+              <>
+                {previewRecord && (
+                  <>
+                    <ModalHeader className="flex flex-col gap-1">
+                      <h3 className="heading-display text-lg text-white">
+                        {previewRecord.fileName}
+                      </h3>
+                      <p className="text-sm text-white/50 font-normal">
+                        {previewRecord.width} × {previewRecord.height} · {formatTime(previewRecord.createdAt)}
+                      </p>
+                    </ModalHeader>
+                    <ModalBody>
+                      <div className="grid md:grid-cols-2 gap-4">
+                        <div className="glass-card p-4">
+                          <span className="tag text-xs mb-3 inline-block">原图</span>
+                          <img
+                            src={previewRecord.originalImage}
+                            alt="原图"
+                            className="w-full rounded-lg cursor-zoom-in hover:opacity-90 transition-opacity"
+                            onClick={() => {
+                              setPreviewImage({
+                                src: previewRecord.originalImage,
+                                title: "原图",
+                                fileName: previewRecord.fileName,
+                                isProcessed: false,
+                              });
+                              onPreviewImageOpen();
+                            }}
+                          />
+                        </div>
+                        <div className="glass-card p-4" style={{ borderColor: "rgba(100, 255, 218, 0.3)" }}>
+                          <span className="tag tag-mint text-xs mb-3 inline-flex items-center gap-1">
+                            <Check className="w-3 h-3" />
+                            已移除水印
+                          </span>
+                          <img
+                            src={previewRecord.processedImage}
+                            alt="处理后"
+                            className="w-full rounded-lg cursor-zoom-in hover:opacity-90 transition-opacity"
+                            onClick={() => {
+                              setPreviewImage({
+                                src: previewRecord.processedImage,
+                                title: "已移除水印",
+                                fileName: previewRecord.fileName,
+                                isProcessed: true,
+                              });
+                              onPreviewImageOpen();
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </ModalBody>
+                  </>
+                )}
+              </>
+            )}
+          </ModalContent>
+        </Modal>
 
-        {/* 图片大图预览弹窗 */}
-        <AnimatePresence>
-          {previewImage && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-50 flex items-center justify-center p-4"
-              style={{ background: "rgba(15, 12, 41, 0.95)" }}
-              onClick={() => setPreviewImage(null)}
-            >
-              <motion.div
-                initial={{ scale: 0.9, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.9, opacity: 0 }}
-                className="relative max-w-[90vw] max-h-[90vh] flex flex-col items-center"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="absolute -top-12 left-0 right-0 flex items-center justify-between">
-                  <span className="tag text-sm">{previewImage.title}</span>
-                  <button
-                    onClick={() => setPreviewImage(null)}
-                    className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
+        {/* 图片大图预览弹窗 - HeroUI Modal */}
+        <Modal
+          isOpen={isPreviewImageOpen}
+          onOpenChange={onPreviewImageOpenChange}
+          size="full"
+          backdrop="blur"
+          classNames={{
+            backdrop: "bg-[#0f0c29]/90 backdrop-blur-md",
+            base: "bg-transparent shadow-none",
+            body: "flex items-center justify-center",
+            closeButton: "hover:bg-white/5 active:bg-white/10 text-white",
+          }}
+        >
+          <ModalContent>
+            {(onClose) => (
+              <>
+                {previewImage && (
+                  <ModalBody>
+                    <div className="flex flex-col items-center gap-4">
+                      <span className="tag text-sm">{previewImage.title}</span>
+                      <img
+                        src={previewImage.src}
+                        alt={previewImage.title}
+                        className="max-w-[90vw] max-h-[75vh] rounded-xl object-contain"
+                      />
+                      <button
+                        onClick={() => {
+                          const baseName = previewImage.fileName.replace(/\.[^.]+$/, "");
+                          const suffix = previewImage.isProcessed ? "no_watermark" : "watermarked";
+                          const a = document.createElement("a");
+                          a.href = previewImage.src;
+                          a.download = `${baseName}-${suffix}.png`;
+                          a.click();
+                        }}
+                        className="btn-liquid btn-primary flex items-center gap-2"
+                      >
+                        <Download className="w-4 h-4" />
+                        下载图片
+                      </button>
+                    </div>
+                  </ModalBody>
+                )}
+              </>
+            )}
+          </ModalContent>
+        </Modal>
+
+        {/* 清空确认弹窗 - HeroUI Modal */}
+        <Modal
+          isOpen={isClearConfirmOpen}
+          onOpenChange={onClearConfirmOpenChange}
+          size="sm"
+          backdrop="blur"
+          classNames={{
+            backdrop: "bg-[#0f0c29]/80 backdrop-blur-md",
+            base: "border-[#292f46] bg-[#19172c] text-[#a8b0d3]",
+            header: "border-b-[1px] border-[#292f46]",
+            footer: "border-t-[1px] border-[#292f46]",
+            closeButton: "hover:bg-white/5 active:bg-white/10",
+          }}
+        >
+          <ModalContent>
+            {(onClose) => (
+              <>
+                <ModalHeader>
+                  <div className="flex items-center gap-2">
+                    <Trash2 className="w-5 h-5 text-[#ff6b9d]" />
+                    <span className="text-white">清空历史记录</span>
+                  </div>
+                </ModalHeader>
+                <ModalBody>
+                  <p className="text-white/70">确定要清空所有历史记录吗？此操作无法撤销。</p>
+                </ModalBody>
+                <ModalFooter>
+                  <Button
+                    variant="light"
+                    onPress={onClose}
+                    className="text-white/70 hover:text-white"
                   >
-                    <X className="w-5 h-5 text-white/70" />
-                  </button>
-                </div>
-                <img
-                  src={previewImage.src}
-                  alt={previewImage.title}
-                  className="max-w-full max-h-[80vh] rounded-xl object-contain"
-                />
-                <button
-                  onClick={() => {
-                    const baseName = previewImage.fileName.replace(/\.[^.]+$/, "");
-                    const suffix = previewImage.isProcessed ? "no_watermark" : "watermarked";
-                    const a = document.createElement("a");
-                    a.href = previewImage.src;
-                    a.download = `${baseName}-${suffix}.png`;
-                    a.click();
-                  }}
-                  className="mt-4 btn-liquid btn-primary flex items-center gap-2"
-                >
-                  <Download className="w-4 h-4" />
-                  下载图片
-                </button>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+                    取消
+                  </Button>
+                  <Button
+                    color="danger"
+                    onPress={() => {
+                      handleClearHistory();
+                      onClose();
+                    }}
+                    className="bg-[#ff6b9d] text-white"
+                  >
+                    确认清空
+                  </Button>
+                </ModalFooter>
+              </>
+            )}
+          </ModalContent>
+        </Modal>
 
         {/* 主内容区 */}
         <main>
@@ -422,6 +623,7 @@ export default function GeminiWatermarkPage() {
               <input
                 ref={fileInputRef}
                 type="file"
+                multiple
                 accept="image/*"
                 onChange={handleFileInput}
                 className="hidden"
@@ -437,9 +639,9 @@ export default function GeminiWatermarkPage() {
 
                 <div>
                   <p className="heading-display text-2xl text-white mb-2">
-                    拖放图片到这里
+                    拖放图片到这里（支持批量）
                   </p>
-                  <p className="text-white/50">或点击选择文件</p>
+                  <p className="text-white/50">或点击选择文件（可多选）</p>
                 </div>
 
                 <div className="flex items-center justify-center gap-3">
@@ -465,8 +667,20 @@ export default function GeminiWatermarkPage() {
                   <Sparkles className="w-6 h-6 text-[#64ffda]" />
                 </div>
               </div>
-              <p className="heading-display text-xl text-white">正在处理...</p>
+              <p className="heading-display text-xl text-white">
+                {isBatchMode ? "正在批量处理..." : "正在处理..."}
+              </p>
               <p className="text-white/50 mt-2">使用反向 Alpha 混合算法移除水印</p>
+              {isBatchMode && batchTotal > 1 && (
+                <div className="mt-3 space-y-1">
+                  <p className="text-white/60">
+                    已完成 {batchCompleted} / {batchTotal}
+                  </p>
+                  {batchCurrent && (
+                    <p className="text-white/40 text-sm truncate">当前：{batchCurrent}</p>
+                  )}
+                </div>
+              )}
             </motion.div>
           )}
 
@@ -488,8 +702,8 @@ export default function GeminiWatermarkPage() {
             </motion.div>
           )}
 
-          {/* 处理完成 */}
-          {state === "done" && originalImage && processedImage && (
+          {/* 处理完成 - 单张 */}
+          {state === "done" && !isBatchMode && originalImage && processedImage && (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -518,12 +732,15 @@ export default function GeminiWatermarkPage() {
                     src={originalImage}
                     alt="原图"
                     className="w-full rounded-xl cursor-zoom-in hover:opacity-90 transition-opacity"
-                    onClick={() => setPreviewImage({
-                      src: originalImage,
-                      title: "原图",
-                      fileName,
-                      isProcessed: false,
-                    })}
+                    onClick={() => {
+                      setPreviewImage({
+                        src: originalImage,
+                        title: "原图",
+                        fileName,
+                        isProcessed: false,
+                      });
+                      onPreviewImageOpen();
+                    }}
                   />
                 </div>
 
@@ -537,12 +754,15 @@ export default function GeminiWatermarkPage() {
                     src={processedImage}
                     alt="处理后"
                     className="w-full rounded-xl cursor-zoom-in hover:opacity-90 transition-opacity"
-                    onClick={() => setPreviewImage({
-                      src: processedImage,
-                      title: "已移除水印",
-                      fileName,
-                      isProcessed: true,
-                    })}
+                    onClick={() => {
+                      setPreviewImage({
+                        src: processedImage,
+                        title: "已移除水印",
+                        fileName,
+                        isProcessed: true,
+                      });
+                      onPreviewImageOpen();
+                    }}
                   />
                 </div>
               </div>
@@ -553,6 +773,93 @@ export default function GeminiWatermarkPage() {
                   <Download className="w-5 h-5" />
                   下载处理后的图片
                 </button>
+                <button onClick={handleReset} className="btn-liquid flex items-center gap-2">
+                  <RefreshCw className="w-5 h-5" />
+                  处理其他图片
+                </button>
+              </div>
+            </motion.div>
+          )}
+
+          {/* 处理完成 - 批量 */}
+          {state === "done" && isBatchMode && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="space-y-8"
+            >
+              <div className="text-center space-y-2">
+                <p className="heading-display text-xl text-white">批量处理完成</p>
+                <p className="text-white/50">
+                  成功 {batchSuccess} · 失败 {batchFailed}
+                </p>
+              </div>
+
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {batchItems.map((item) => (
+                  <div key={item.id} className="glass-card p-4">
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <p className="text-sm text-white truncate min-w-0 flex-1">{item.fileName}</p>
+                      {item.status === "done" ? (
+                        <span className="tag tag-mint text-[10px] shrink-0 whitespace-nowrap">成功</span>
+                      ) : item.status === "error" ? (
+                        <span className="tag tag-coral text-[10px] shrink-0 whitespace-nowrap">失败</span>
+                      ) : (
+                        <span className="tag text-[10px] shrink-0 whitespace-nowrap">处理中</span>
+                      )}
+                    </div>
+
+                    {item.status === "done" && item.record ? (
+                      <>
+                        <img
+                          src={item.record.processedImage}
+                          alt={`${item.fileName} 处理后`}
+                          className="w-full aspect-square object-cover rounded-lg cursor-zoom-in hover:opacity-90 transition-opacity"
+                          onClick={() => {
+                            if (item.record) {
+                              setPreviewRecord(item.record);
+                              onPreviewRecordOpen();
+                            }
+                          }}
+                        />
+                        <div className="flex items-center gap-2 mt-3">
+                          <button
+                            onClick={() => {
+                              if (item.record) {
+                                handleDownloadRecord(item.record);
+                              }
+                            }}
+                            className="tag text-xs cursor-pointer hover:bg-white/10 transition-colors"
+                          >
+                            下载
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (item.record) {
+                                setPreviewRecord(item.record);
+                                onPreviewRecordOpen();
+                              }
+                            }}
+                            className="tag text-xs cursor-pointer hover:bg-white/10 transition-colors"
+                          >
+                            查看对比
+                          </button>
+                        </div>
+                      </>
+                    ) : item.status === "error" ? (
+                      <div className="rounded-lg border border-[#ff6b9d]/20 bg-[#ff6b9d]/10 p-3 text-sm text-[#ff6b9d]">
+                        {item.error ?? "处理失败"}
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-sm text-white/60">
+                        等待处理...
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex justify-center gap-4 flex-wrap">
                 <button onClick={handleReset} className="btn-liquid flex items-center gap-2">
                   <RefreshCw className="w-5 h-5" />
                   处理其他图片
