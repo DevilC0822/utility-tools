@@ -120,8 +120,9 @@ export default function GeminiWatermarkPage() {
 
   const handleSingleFile = useCallback(
     async (file: File) => {
-      if (!file.type.startsWith("image/")) {
-        setError("请上传图片文件");
+      const supportedTypes = ["image/jpeg", "image/png", "image/webp", "image/bmp"];
+      if (!supportedTypes.includes(file.type)) {
+        setError("仅支持 JPEG、PNG、WebP、BMP 格式");
         setState("error");
         return;
       }
@@ -218,9 +219,10 @@ export default function GeminiWatermarkPage() {
 
   const handleFiles = useCallback(
     (files: File[]) => {
-      const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+      const supportedTypes = ["image/jpeg", "image/png", "image/webp", "image/bmp"];
+      const imageFiles = files.filter((file) => supportedTypes.includes(file.type));
       if (imageFiles.length === 0) {
-        setError("请上传图片文件");
+        setError("仅支持 JPEG、PNG、WebP、BMP 格式");
         setState("error");
         return;
       }
@@ -374,13 +376,31 @@ export default function GeminiWatermarkPage() {
         </header>
 
         {/* 历史记录面板 */}
-        <AnimatePresence>
+        <AnimatePresence initial={false}>
           {showHistory && history.length > 0 && (
             <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              className="glass-card p-6 mb-8 overflow-hidden"
+              key="history-panel"
+              initial={{ opacity: 0, height: 0, y: -12, paddingTop: 0, paddingBottom: 0 }}
+              animate={{
+                opacity: 1,
+                height: "auto",
+                y: 0,
+                paddingTop: 24,
+                paddingBottom: 24,
+              }}
+              exit={{
+                opacity: 0,
+                height: 0,
+                y: -8,
+                paddingTop: 0,
+                paddingBottom: 0,
+                transition: { duration: 0.2, ease: [0.4, 0, 1, 1] },
+              }}
+              transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+              style={{
+                transformOrigin: "top center",
+              }}
+              className="glass-card history-panel px-6 mb-8"
             >
               <div className="flex items-center justify-between mb-4">
                 <h2 className="heading-display text-lg text-white">转换历史</h2>
@@ -438,6 +458,26 @@ export default function GeminiWatermarkPage() {
           size="4xl"
           backdrop="blur"
           scrollBehavior="inside"
+          motionProps={{
+            variants: {
+              enter: {
+                scale: 1,
+                opacity: 1,
+                transition: {
+                  duration: 0.3,
+                  ease: [0.32, 0.72, 0, 1],
+                },
+              },
+              exit: {
+                scale: 0.95,
+                opacity: 0,
+                transition: {
+                  duration: 0.2,
+                  ease: [0.32, 0.72, 0, 1],
+                },
+              },
+            },
+          }}
           classNames={{
             backdrop: "bg-[#0f0c29]/80 backdrop-blur-md",
             base: "border-[#292f46] bg-[#19172c] text-[#a8b0d3]",
@@ -624,7 +664,7 @@ export default function GeminiWatermarkPage() {
                 ref={fileInputRef}
                 type="file"
                 multiple
-                accept="image/*"
+                accept=".jpg,.jpeg,.png,.webp,.bmp"
                 onChange={handleFileInput}
                 className="hidden"
               />

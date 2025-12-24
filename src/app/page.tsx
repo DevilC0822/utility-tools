@@ -54,12 +54,12 @@ const tools = [
   {
     id: "base64-tool",
     name: "Base64 编解码",
-    description: "快速进行 Base64 编码解码，支持文本和图片",
+    description: "快速进行 Base64 编码解码，支持文本和文件",
     icon: Code2,
     color: "mint",
     href: "/tools/base64",
     tags: ["编码"],
-    online: false,
+    online: true,
   },
   {
     id: "json-formatter",
@@ -260,12 +260,17 @@ export default function Home() {
 
   // 根据选中标签过滤工具
   const filteredTools = useMemo(() => {
-    if (selectedTags.length === 0) {
-      return tools;
-    }
-    return tools.filter((tool) =>
-      tool.tags.some((tag) => selectedTags.includes(tag))
-    );
+    const list = selectedTags.length === 0
+      ? tools
+      : tools.filter((tool) => tool.tags.some((tag) => selectedTags.includes(tag)));
+
+    return list
+      .map((tool, index) => ({ tool, index }))
+      .sort((a, b) => {
+        if (a.tool.online === b.tool.online) return a.index - b.index;
+        return a.tool.online ? -1 : 1;
+      })
+      .map(({ tool }) => tool);
   }, [selectedTags]);
 
   return (

@@ -155,6 +155,17 @@ body {
     0 0 60px rgba(100, 255, 218, 0.1);
 }
 
+.history-panel {
+  transition: none;
+  will-change: height, opacity, transform;
+}
+
+.history-panel:hover {
+  transform: none;
+  box-shadow: none;
+  border-color: var(--glass-border);
+}
+
 /* ===== Tool Card Specific ===== */
 .tool-card {
   cursor: pointer;
