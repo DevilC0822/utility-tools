@@ -154,15 +154,6 @@ function ToolCard({ tool }: { tool: (typeof tools)[0] }) {
         }`}
         onMouseEnter={tool.online ? handleMouseEnter : undefined}
       >
-        {/* 覆盖整个卡片的链接层，仅在上线时可点击 */}
-        {tool.online && (
-          <Link
-            href={tool.href}
-            className="absolute inset-0 z-0"
-            aria-label={tool.name}
-          />
-        )}
-
         {/* 即将上线标签 */}
         {!tool.online && (
           <div className="absolute top-4 right-4 z-10">
@@ -191,15 +182,15 @@ function ToolCard({ tool }: { tool: (typeof tools)[0] }) {
         </div>
 
         {/* Icon */}
-        <div className={`icon-wrapper ${tool.color} relative z-10 pointer-events-none`}>
+        <div className={`icon-wrapper ${tool.color} pointer-events-none`}>
           <IconComponent
             className={`w-6 h-6 ${colorClasses[tool.color as keyof typeof colorClasses]}`}
             strokeWidth={1.5}
           />
         </div>
 
-        {/* Content - 可选择复制 */}
-        <div className="space-y-2 relative z-10 select-text pointer-events-auto">
+        {/* Content */}
+        <div className="space-y-2 pointer-events-none">
           <h3 className={`heading-display text-lg transition-colors ${
             tool.online ? "text-white group-hover:text-[#64ffda]" : "text-white/70"
           }`}>
@@ -210,8 +201,8 @@ function ToolCard({ tool }: { tool: (typeof tools)[0] }) {
           </p>
         </div>
 
-        {/* Tags - 可选择复制 */}
-        <div className="flex flex-wrap gap-2 mt-2 relative z-10 select-text pointer-events-auto">
+        {/* Tags */}
+        <div className="flex flex-wrap gap-2 mt-2 pointer-events-none">
           {tool.tags.map((tag) => (
             <span key={tag} className="tag text-xs">
               {tag}
@@ -221,9 +212,18 @@ function ToolCard({ tool }: { tool: (typeof tools)[0] }) {
 
         {/* Arrow indicator - 仅在上线时显示 */}
         {tool.online && (
-          <div className="absolute bottom-6 right-6 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0 z-10 pointer-events-none">
+          <div className="absolute bottom-6 right-6 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0 pointer-events-none">
             <ArrowRight className="w-5 h-5 text-[#64ffda]" />
           </div>
+        )}
+
+        {/* 覆盖整个卡片的链接层，仅在上线时可点击 */}
+        {tool.online && (
+          <Link
+            href={tool.href}
+            className="absolute inset-0 z-10"
+            aria-label={tool.name}
+          />
         )}
       </div>
     </motion.div>
