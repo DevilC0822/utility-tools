@@ -22,6 +22,10 @@ pnpm lint     # ESLint 检查
 - **图标库**: Lucide React（避免使用表情符号）
 - **语言**: TypeScript
 
+## 组件使用规范
+
+**UI 组件优先使用 HeroUI 组件库**：所有表单控件（Select、Input、Button、Checkbox 等）、模态框、卡片等 UI 组件应优先使用 HeroUI 提供的组件，保持界面风格统一。仅在 HeroUI 未提供对应组件时才使用原生 HTML 元素或自定义组件。
+
 ## 目录结构
 
 ```

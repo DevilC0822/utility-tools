@@ -15,6 +15,7 @@ import {
   Check,
   Loader2,
 } from "lucide-react";
+import { Select, SelectItem, Slider } from "@heroui/react";
 import {
   type CompressOptions,
   type OutputFormat,
@@ -54,19 +55,11 @@ type CompressItem = {
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_FILE_LABEL = "10MB";
 
-const QUALITY_MIN = 40;
 const QUALITY_MAX = 95;
 const QUALITY_HIGH_MIN = 80;
 const QUANTIZE_MAX_PIXELS = 2000000;
 const QUANTIZE_SAMPLE_SIZE = 120000;
 const KEEP_ORIGINAL_IF_LARGER = true;
-
-const QUANTIZE_OPTIONS = [
-  { value: 256, label: "256 色" },
-  { value: 128, label: "128 色" },
-  { value: 64, label: "64 色" },
-  { value: 32, label: "32 色" },
-];
 
 const createId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -81,23 +74,12 @@ const getFileExtension = (mimeType: string | undefined): string => {
 
 const stripFileExtension = (name: string): string => name.replace(/\.[^/.]+$/, "");
 
-const parseDimension = (value: string): number => {
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
-  return Math.min(parsed, 20000);
-};
-
 export default function ImageCompressPage() {
   const [items, setItems] = useState<CompressItem[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [outputFormat, setOutputFormat] = useState<OutputFormat>("auto");
   const [quality, setQuality] = useState(82);
-  const [maxWidth, setMaxWidth] = useState("");
-  const [maxHeight, setMaxHeight] = useState("");
-  const [enableQuantization, setEnableQuantization] = useState(true);
-  const [quantizeColors, setQuantizeColors] = useState(256);
-  const [highQuality, setHighQuality] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const itemsRef = useRef<CompressItem[]>([]);
   const processingIdRef = useRef(0);
@@ -133,28 +115,20 @@ export default function ImageCompressPage() {
   }, [availableFormats, outputFormat]);
 
   const options = useMemo<CompressOptions>(() => {
-    const minQuality = highQuality ? QUALITY_HIGH_MIN : QUALITY_MIN;
-    const safeQuality = Math.min(QUALITY_MAX, Math.max(minQuality, quality));
+    const safeQuality = Math.min(QUALITY_MAX, Math.max(QUALITY_HIGH_MIN, quality));
     return {
       outputFormat,
       quality: safeQuality / 100,
-      maxWidth: parseDimension(maxWidth),
-      maxHeight: parseDimension(maxHeight),
+      maxWidth: 0,
+      maxHeight: 0,
       backgroundColor: "#ffffff",
-      enableQuantization,
-      quantizeColors,
+      enableQuantization: true,
+      quantizeColors: 256,
       quantizeMaxPixels: QUANTIZE_MAX_PIXELS,
       quantizeSampleSize: QUANTIZE_SAMPLE_SIZE,
       keepOriginalIfLarger: KEEP_ORIGINAL_IF_LARGER,
     };
-  }, [outputFormat, quality, maxWidth, maxHeight, enableQuantization, quantizeColors, highQuality]);
-
-  useEffect(() => {
-    if (!highQuality) return;
-    if (quality < QUALITY_HIGH_MIN) {
-      setQuality(QUALITY_HIGH_MIN);
-    }
-  }, [highQuality, quality]);
+  }, [outputFormat, quality]);
 
   const updateItem = useCallback((id: string, updates: Partial<CompressItem>) => {
     setItems((prev) =>
@@ -434,109 +408,66 @@ export default function ImageCompressPage() {
           transition={{ duration: 0.5, delay: 0.1 }}
           className="glass-card p-6 mb-8"
         >
-          <div className="grid gap-4 md:grid-cols-4">
+          <div className="grid gap-6 md:grid-cols-2 items-start">
             <div className="space-y-2">
-              <div className="text-xs text-white/50">输出格式</div>
-              <select
-                value={outputFormat}
-                onChange={(event) => setOutputFormat(event.target.value as OutputFormat)}
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white/90 focus:outline-none focus:border-[#64ffda]/40"
+              <Select
+                label="输出格式"
+                labelPlacement="outside"
+                size="sm"
+                selectedKeys={new Set([outputFormat])}
+                onSelectionChange={(keys) => {
+                  const selected = Array.from(keys)[0] as OutputFormat;
+                  if (selected) setOutputFormat(selected);
+                }}
+                classNames={{
+                  trigger: "bg-white/5 border border-white/10 data-[hover=true]:bg-white/10",
+                  label: "text-white/50 text-xs",
+                  value: "text-white/90",
+                  popoverContent: "bg-[#1a1a2e] border border-white/10",
+                }}
               >
                 {availableFormats.map((format) => (
-                  <option key={format.value} value={format.value} className="text-black">
+                  <SelectItem key={format.value} textValue={format.label}>
                     {format.label}
-                  </option>
+                  </SelectItem>
                 ))}
-              </select>
+              </Select>
               <p className="text-[11px] text-white/40">
                 JPEG 不支持透明，会自动填充白色
               </p>
             </div>
 
             <div className="space-y-2">
-              <div className="flex items-center justify-between text-xs text-white/50">
-                <span>质量</span>
-                <span className="text-white/70">{quality}</span>
+              <div className="text-xs text-white/50 mb-1">质量</div>
+              <div className="flex items-center gap-4">
+                <div className="flex-1 h-10 flex items-center">
+                  <Slider
+                    aria-label="质量"
+                    size="md"
+                    step={0.1}
+                    minValue={QUALITY_HIGH_MIN}
+                    maxValue={QUALITY_MAX}
+                    value={quality}
+                    onChange={(value) => setQuality(value as number)}
+                    onChangeEnd={(value) => setQuality(Math.round(value as number))}
+                    isDisabled={outputFormat !== "auto" && !isLossyType(outputFormat)}
+                    hideValue
+                    classNames={{
+                      base: "max-w-full",
+                      track: "h-2 bg-white/10 border-s-0 rounded-full",
+                      filler: "bg-[#64ffda] rounded-full",
+                      thumb: "w-4 h-4 bg-white shadow-md after:w-4 after:h-4 after:bg-white",
+                    }}
+                  />
+                </div>
+                <span className="text-sm text-white/90 w-8 text-right tabular-nums">
+                  {Math.round(quality)}
+                </span>
               </div>
-              <input
-                type="range"
-                min={highQuality ? QUALITY_HIGH_MIN : QUALITY_MIN}
-                max={QUALITY_MAX}
-                value={quality}
-                onChange={(event) => setQuality(Number(event.target.value))}
-                className="w-full accent-[#64ffda]"
-                disabled={outputFormat !== "auto" && !isLossyType(outputFormat)}
-              />
               <p className="text-[11px] text-white/40">
                 仅对 JPEG / WebP / AVIF 生效
               </p>
             </div>
-
-            <div className="space-y-2">
-              <div className="text-xs text-white/50">最大宽度（像素）</div>
-              <input
-                type="number"
-                min={0}
-                inputMode="numeric"
-                placeholder="不限制"
-                value={maxWidth}
-                onChange={(event) => setMaxWidth(event.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white/90 focus:outline-none focus:border-[#64ffda]/40"
-              />
-              <p className="text-[11px] text-white/40">保持比例缩放，仅缩小不放大</p>
-            </div>
-
-            <div className="space-y-2">
-              <div className="text-xs text-white/50">最大高度（像素）</div>
-              <input
-                type="number"
-                min={0}
-                inputMode="numeric"
-                placeholder="不限制"
-                value={maxHeight}
-                onChange={(event) => setMaxHeight(event.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm text-white/90 focus:outline-none focus:border-[#64ffda]/40"
-              />
-              <p className="text-[11px] text-white/40">建议与最大宽度配合使用</p>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3 mt-6 pt-4 border-t border-white/10">
-            <button
-              onClick={() => setEnableQuantization((prev) => !prev)}
-              className={`tag text-xs cursor-pointer transition-all ${
-                enableQuantization ? "tag-mint" : "hover:border-white/30"
-              }`}
-            >
-              颜色量化（PNG）
-            </button>
-            <select
-              value={quantizeColors}
-              onChange={(event) => setQuantizeColors(Number(event.target.value))}
-              className="bg-white/5 border border-white/10 rounded-full px-3 py-1 text-xs text-white/80 focus:outline-none focus:border-[#64ffda]/40"
-              disabled={!enableQuantization}
-              style={{ opacity: enableQuantization ? 1 : 0.5 }}
-            >
-              {QUANTIZE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value} className="text-black">
-                  {option.label}
-                </option>
-              ))}
-            </select>
-            <button
-              onClick={() => setHighQuality((prev) => !prev)}
-              className={`tag text-xs cursor-pointer transition-all ${
-                highQuality ? "tag-mint" : "hover:border-white/30"
-              }`}
-            >
-              高质量编码
-            </button>
-            <span className="tag text-xs text-white/60">
-              重新编码时清理元数据
-            </span>
-            <span className="tag text-xs text-white/60">
-              变大则保留原图
-            </span>
           </div>
 
           <div className="flex flex-wrap items-center gap-3 mt-6">
