@@ -3,6 +3,7 @@ import {
   getToolStats,
   incrTotalVisits,
   incrToolUsage,
+  logToolAccess,
 } from "@/lib/db";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -33,7 +34,11 @@ export async function POST(request: NextRequest) {
     if (type === "visit") {
       await incrTotalVisits();
     } else if (type === "tool" && tool) {
-      await incrToolUsage(tool);
+      // 同时更新统计计数和记录访问日志
+      await Promise.all([
+        incrToolUsage(tool),
+        logToolAccess(tool),
+      ]);
     }
 
     return NextResponse.json({ success: true });

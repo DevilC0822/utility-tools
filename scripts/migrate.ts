@@ -30,10 +30,29 @@ async function migrate() {
         id SERIAL PRIMARY KEY,
         key VARCHAR(255) UNIQUE NOT NULL,
         value INTEGER DEFAULT 0,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        updated_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Shanghai')
       )
     `;
     console.log("✅ stats 表已就绪");
+
+    // 创建访问日志表
+    await sql`
+      CREATE TABLE IF NOT EXISTS access_logs (
+        id SERIAL PRIMARY KEY,
+        tool VARCHAR(100) NOT NULL,
+        created_at TIMESTAMP DEFAULT (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Shanghai')
+      )
+    `;
+    console.log("✅ access_logs 表已就绪");
+
+    // 为 access_logs 表添加索引（如果不存在）
+    await sql`
+      CREATE INDEX IF NOT EXISTS idx_access_logs_tool ON access_logs (tool)
+    `;
+    await sql`
+      CREATE INDEX IF NOT EXISTS idx_access_logs_created_at ON access_logs (created_at)
+    `;
+    console.log("✅ access_logs 索引已就绪");
 
     console.log("\n🎉 迁移完成！");
   } catch (error) {

@@ -9,24 +9,6 @@ function isDev(): boolean {
   return process.env.NODE_ENV === "development";
 }
 
-// 获取今天的日期字符串
-function getTodayKey(): string {
-  return new Date().toISOString().split("T")[0];
-}
-
-// 检查今天是否已记录过（基于 localStorage）
-function hasRecordedToday(key: string): boolean {
-  if (typeof window === "undefined") return true;
-  const stored = localStorage.getItem(`stats:${key}`);
-  return stored === getTodayKey();
-}
-
-// 标记今天已记录
-function markRecordedToday(key: string): void {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(`stats:${key}`, getTodayKey());
-}
-
 // 获取统计数据（带超时和错误处理）
 export async function fetchStats(): Promise<Stats | null> {
   try {
@@ -46,41 +28,35 @@ export async function fetchStats(): Promise<Stats | null> {
   }
 }
 
-// 记录页面访问（fire-and-forget 模式）
+// 记录页面访问（fire-and-forget 模式，每次会话只记录一次）
 export function recordVisit(): void {
   if (isDev()) return;
-  if (hasRecordedToday("visit")) return;
+  if (typeof window === "undefined") return;
 
-  // 标记为已记录（乐观更新）
-  markRecordedToday("visit");
+  // 使用 sessionStorage 实现会话级去重：关闭网页后清除，刷新时保留
+  const key = "stats:visit";
+  if (sessionStorage.getItem(key)) return;
 
-  // 异步发送，不等待结果
+  sessionStorage.setItem(key, "1");
+
   fetch("/api/stats", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ type: "visit" }),
   }).catch(() => {
-    // 发送失败时回滚标记，下次再试
-    localStorage.removeItem("stats:visit");
+    sessionStorage.removeItem(key);
   });
 }
 
-// 记录工具使用（fire-and-forget 模式）
+// 记录工具使用（fire-and-forget 模式，每次使用都计数）
 export function recordToolUsage(tool: string): void {
   if (isDev()) return;
-  const key = `tool:${tool}`;
-  if (hasRecordedToday(key)) return;
 
-  // 标记为已记录（乐观更新）
-  markRecordedToday(key);
-
-  // 异步发送，不等待结果
   fetch("/api/stats", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ type: "tool", tool }),
   }).catch(() => {
-    // 发送失败时回滚标记，下次再试
-    localStorage.removeItem(`stats:${key}`);
+    // 静默失败
   });
 }

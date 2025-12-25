@@ -32,14 +32,14 @@ export async function getStatValue(key: string): Promise<number> {
 }
 
 /**
- * 增加统计值
+ * 增加统计值（使用 UTC+8 时间）
  */
 export async function incrStatValue(key: string): Promise<number> {
   const result = await sql`
     INSERT INTO stats (key, value, updated_at)
-    VALUES (${key}, 1, CURRENT_TIMESTAMP)
+    VALUES (${key}, 1, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Shanghai')
     ON CONFLICT (key)
-    DO UPDATE SET value = stats.value + 1, updated_at = CURRENT_TIMESTAMP
+    DO UPDATE SET value = stats.value + 1, updated_at = CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Shanghai'
     RETURNING value
   `;
   return result[0].value;
@@ -80,4 +80,36 @@ export async function getToolStats(): Promise<Record<string, number>> {
  */
 export async function incrToolUsage(tool: string): Promise<number> {
   return incrStatValue(KEYS.toolUsage(tool));
+}
+
+/**
+ * 记录工具访问日志（使用 UTC+8 时间）
+ */
+export async function logToolAccess(tool: string): Promise<void> {
+  await sql`
+    INSERT INTO access_logs (tool, created_at)
+    VALUES (${tool}, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Shanghai')
+  `;
+}
+
+/**
+ * 访问日志记录类型
+ */
+export interface AccessLog {
+  id: number;
+  tool: string;
+  created_at: Date;
+}
+
+/**
+ * 获取最近的访问日志
+ */
+export async function getRecentAccessLogs(limit = 100): Promise<AccessLog[]> {
+  const result = await sql`
+    SELECT id, tool, created_at
+    FROM access_logs
+    ORDER BY created_at DESC
+    LIMIT ${limit}
+  `;
+  return result as unknown as AccessLog[];
 }
