@@ -39,7 +39,7 @@ const tools = [
     color: "coral",
     href: "/tools/image-compress",
     tags: ["图片处理"],
-    online: false,
+    online: true,
   },
   {
     id: "format-convert",

@@ -54,7 +54,7 @@ const scheduleWork = (work: () => void): ScheduledHandle | null => {
     const id = window.requestIdleCallback(() => work(), { timeout: 200 });
     return { kind: "idle", id };
   }
-  const id = window.setTimeout(work, 0);
+  const id = globalThis.setTimeout(work, 0) as unknown as number;
   return { kind: "timeout", id };
 };
 

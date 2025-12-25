@@ -288,7 +288,7 @@ export function base64ToBlob(
     const decoded = decodeBase64ToBytes(pureBase64, urlSafe);
     if (!decoded.success) return null;
 
-    return new Blob([decoded.bytes], { type: detectedMime });
+    return new Blob([decoded.bytes.slice()], { type: detectedMime });
   } catch {
     return null;
   }
@@ -332,13 +332,4 @@ export function formatBase64(base64: string, lineLength = 76): string {
   return lines.join("\n");
 }
 
-/**
- * 计算字节大小的可读格式
- */
-export function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
-}
+export { formatBytes } from "./format";
