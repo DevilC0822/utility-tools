@@ -2,7 +2,7 @@
 
 import { motion, AnimatePresence, LayoutGroup } from "framer-motion";
 import Link from "next/link";
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import {
   ImageOff,
   Minimize2,
@@ -235,11 +235,16 @@ export default function Home() {
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   // 统计数据
   const [stats, setStats] = useState<Stats | null>(null);
+  // 防止重复请求
+  const fetchedRef = useRef(false);
 
   // 加载统计数据并记录访问
   useEffect(() => {
+    if (fetchedRef.current) return;
+    fetchedRef.current = true;
+
     recordVisit();
-    fetchStats().then(setStats).catch(console.error);
+    fetchStats().then(setStats);
   }, []);
 
   // 处理标签点击

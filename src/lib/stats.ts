@@ -27,35 +27,60 @@ function markRecordedToday(key: string): void {
   localStorage.setItem(`stats:${key}`, getTodayKey());
 }
 
-// 获取统计数据
-export async function fetchStats(): Promise<Stats> {
-  const res = await fetch("/api/stats", { cache: "no-store" });
-  if (!res.ok) throw new Error("获取统计失败");
-  return res.json();
+// 获取统计数据（带超时和错误处理）
+export async function fetchStats(): Promise<Stats | null> {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+    const res = await fetch("/api/stats", {
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
 }
 
-// 记录页面访问（每用户每天仅一次）
-export async function recordVisit(): Promise<void> {
+// 记录页面访问（fire-and-forget 模式）
+export function recordVisit(): void {
   if (isDev()) return;
   if (hasRecordedToday("visit")) return;
 
-  await fetch("/api/stats", {
+  // 标记为已记录（乐观更新）
+  markRecordedToday("visit");
+
+  // 异步发送，不等待结果
+  fetch("/api/stats", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ type: "visit" }),
+  }).catch(() => {
+    // 发送失败时回滚标记，下次再试
+    localStorage.removeItem("stats:visit");
   });
-  markRecordedToday("visit");
 }
 
-// 记录工具使用（每工具每用户每天仅一次）
-export async function recordToolUsage(tool: string): Promise<void> {
+// 记录工具使用（fire-and-forget 模式）
+export function recordToolUsage(tool: string): void {
   if (isDev()) return;
-  if (hasRecordedToday(`tool:${tool}`)) return;
+  const key = `tool:${tool}`;
+  if (hasRecordedToday(key)) return;
 
-  await fetch("/api/stats", {
+  // 标记为已记录（乐观更新）
+  markRecordedToday(key);
+
+  // 异步发送，不等待结果
+  fetch("/api/stats", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ type: "tool", tool }),
+  }).catch(() => {
+    // 发送失败时回滚标记，下次再试
+    localStorage.removeItem(`stats:${key}`);
   });
-  markRecordedToday(`tool:${tool}`);
 }
